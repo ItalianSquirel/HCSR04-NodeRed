@@ -1,7 +1,7 @@
 {
   "name": "node-red-hcsr04",
   "version": "1.0.0",
-  "description": "Node-RED node for HC-SR04 ultrasonic distance sensor using pigpio",
+  "description": "Node-RED node for HC-SR04 ultrasonic distance sensor using native GPIO",
   "main": "hcsr04.js",
   "keywords": [
     "node-red",
@@ -10,13 +10,11 @@
     "distance",
     "sensor",
     "raspberry-pi",
-    "pigpio"
+    "gpio"
   ],
   "author": "Your Name",
   "license": "MIT",
-  "dependencies": {
-    "rpi-gpio": "^2.1.7"
-  },
+  "dependencies": {},
   "node-red": {
     "nodes": {
       "hcsr04": "hcsr04.js"

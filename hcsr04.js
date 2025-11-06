@@ -10,130 +10,203 @@ module.exports = function(RED) {
         node.echoPin = parseInt(config.echo) || 24;
         node.interval = parseInt(config.interval) || 1000;
         
-        // GPIO variables
-        var gpio;
+        // GPIO variables using fs-based approach (more reliable)
+        var fs = require('fs');
         var measurementTimer;
         var isReading = false;
         var startTime;
+        var echoWatcher;
+        var triggerPath = '/sys/class/gpio/gpio' + node.triggerPin;
+        var echoPath = '/sys/class/gpio/gpio' + node.echoPin;
+        var isInitialized = false;
         
-        // Initialize GPIO
-        try {
-            gpio = require('rpi-gpio');
-        } catch (err) {
-            node.error("Failed to load rpi-gpio library: " + err.message);
-            node.status({fill: "red", shape: "ring", text: "rpi-gpio not available"});
-            return;
+        // Helper function to write to GPIO
+        function writeGpio(pin, value) {
+            try {
+                fs.writeFileSync('/sys/class/gpio/gpio' + pin + '/value', value ? '1' : '0');
+                return true;
+            } catch (err) {
+                node.error("GPIO write error on pin " + pin + ": " + err.message);
+                return false;
+            }
+        }
+        
+        // Helper function to export GPIO pin
+        function exportPin(pin) {
+            try {
+                if (!fs.existsSync('/sys/class/gpio/gpio' + pin)) {
+                    fs.writeFileSync('/sys/class/gpio/export', pin.toString());
+                    // Wait a bit for the pin to be available
+                    var timeout = Date.now() + 1000;
+                    while (!fs.existsSync('/sys/class/gpio/gpio' + pin) && Date.now() < timeout) {
+                        // Wait
+                    }
+                }
+                return fs.existsSync('/sys/class/gpio/gpio' + pin);
+            } catch (err) {
+                node.error("Failed to export pin " + pin + ": " + err.message);
+                return false;
+            }
+        }
+        
+        // Helper function to set pin direction
+        function setPinDirection(pin, direction) {
+            try {
+                fs.writeFileSync('/sys/class/gpio/gpio' + pin + '/direction', direction);
+                return true;
+            } catch (err) {
+                node.error("Failed to set direction for pin " + pin + ": " + err.message);
+                return false;
+            }
         }
         
         // Initialize GPIO pins
-        gpio.setMode(gpio.MODE_BCM);
-        
-        // Setup trigger pin as output
-        gpio.setup(node.triggerPin, gpio.DIR_OUT, function(err) {
-            if (err) {
-                node.error("Failed to setup trigger pin: " + err.message);
-                node.status({fill: "red", shape: "ring", text: "trigger pin setup failed"});
-                return;
-            }
-            
-            // Setup echo pin as input
-            gpio.setup(node.echoPin, gpio.DIR_IN, gpio.EDGE_BOTH, function(err) {
-                if (err) {
-                    node.error("Failed to setup echo pin: " + err.message);
-                    node.status({fill: "red", shape: "ring", text: "echo pin setup failed"});
-                    return;
+        function initializeGpio() {
+            try {
+                // Export and configure trigger pin
+                if (!exportPin(node.triggerPin)) {
+                    node.status({fill: "red", shape: "ring", text: "failed to export trigger pin"});
+                    return false;
                 }
                 
-                // Listen for changes on echo pin
-                gpio.on('change', function(channel, value) {
-                    if (channel === node.echoPin && isReading) {
-                        if (value) {
-                            // Rising edge - start timing
-                            startTime = process.hrtime.bigint();
-                        } else {
-                            // Falling edge - calculate distance
-                            if (startTime) {
-                                var endTime = process.hrtime.bigint();
-                                var duration = Number(endTime - startTime) / 1000; // Convert to microseconds
-                                
-                                // Convert to distance in centimeters
-                                // Speed of sound = 343 m/s = 34300 cm/s = 0.0343 cm/µs
-                                // Distance = (time * speed) / 2 (divided by 2 for round trip)
-                                var distance = duration / 2 / 29.1;
-                                
-                                isReading = false;
-                                
-                                // Only send valid readings (typically 2cm to 400cm for HC-SR04)
-                                if (distance >= 2 && distance <= 400) {
-                                    node.send({
-                                        payload: parseFloat(distance.toFixed(2)),
-                                        topic: "distance",
-                                        unit: "cm",
-                                        timestamp: Date.now()
-                                    });
+                if (!setPinDirection(node.triggerPin, 'out')) {
+                    node.status({fill: "red", shape: "ring", text: "failed to set trigger direction"});
+                    return false;
+                }
+                
+                // Set trigger to low initially
+                if (!writeGpio(node.triggerPin, false)) {
+                    node.status({fill: "red", shape: "ring", text: "failed to initialize trigger"});
+                    return false;
+                }
+                
+                // Export and configure echo pin
+                if (!exportPin(node.echoPin)) {
+                    node.status({fill: "red", shape: "ring", text: "failed to export echo pin"});
+                    return false;
+                }
+                
+                if (!setPinDirection(node.echoPin, 'in')) {
+                    node.status({fill: "red", shape: "ring", text: "failed to set echo direction"});
+                    return false;
+                }
+                
+                // Set up echo pin monitoring
+                try {
+                    fs.writeFileSync('/sys/class/gpio/gpio' + node.echoPin + '/edge', 'both');
+                } catch (err) {
+                    node.error("Failed to set echo edge detection: " + err.message);
+                    return false;
+                }
+                
+                // Monitor echo pin using fs.watchFile (more reliable than fs.watch)
+                var echoValuePath = '/sys/class/gpio/gpio' + node.echoPin + '/value';
+                var lastValue = null;
+                
+                echoWatcher = setInterval(function() {
+                    if (!isReading) return;
+                    
+                    try {
+                        var currentValue = fs.readFileSync(echoValuePath, 'utf8').trim();
+                        
+                        if (lastValue !== null && currentValue !== lastValue) {
+                            if (currentValue === '1' && lastValue === '0') {
+                                // Rising edge - start timing
+                                startTime = process.hrtime.bigint();
+                            } else if (currentValue === '0' && lastValue === '1') {
+                                // Falling edge - calculate distance
+                                if (startTime) {
+                                    var endTime = process.hrtime.bigint();
+                                    var duration = Number(endTime - startTime) / 1000; // Convert to microseconds
                                     
-                                    node.status({
-                                        fill: "green", 
-                                        shape: "dot", 
-                                        text: distance.toFixed(2) + " cm"
-                                    });
-                                } else {
-                                    // Out of range reading
-                                    node.status({
-                                        fill: "yellow", 
-                                        shape: "ring", 
-                                        text: "out of range"
-                                    });
+                                    // Convert to distance in centimeters
+                                    var distance = duration / 2 / 29.1;
+                                    
+                                    isReading = false;
+                                    
+                                    // Only send valid readings
+                                    if (distance >= 2 && distance <= 400) {
+                                        node.send({
+                                            payload: parseFloat(distance.toFixed(2)),
+                                            topic: "distance",
+                                            unit: "cm",
+                                            timestamp: Date.now()
+                                        });
+                                        
+                                        node.status({
+                                            fill: "green", 
+                                            shape: "dot", 
+                                            text: distance.toFixed(2) + " cm"
+                                        });
+                                    } else {
+                                        node.status({
+                                            fill: "yellow", 
+                                            shape: "ring", 
+                                            text: "out of range"
+                                        });
+                                    }
                                 }
                             }
                         }
+                        lastValue = currentValue;
+                    } catch (err) {
+                        // Ignore read errors during cleanup
+                        if (isInitialized) {
+                            node.error("Echo pin read error: " + err.message);
+                        }
                     }
-                });
+                }, 1); // Check every 1ms
                 
+                isInitialized = true;
                 node.status({fill: "green", shape: "dot", text: "ready"});
-            });
-        });
+                return true;
+                
+            } catch (err) {
+                node.error("GPIO initialization failed: " + err.message);
+                node.status({fill: "red", shape: "ring", text: "init failed"});
+                return false;
+            }
+        }
         
         // Function to trigger a distance measurement
         function triggerMeasurement() {
-            if (isReading) return; // Prevent overlapping readings
+            if (isReading || !isInitialized) return;
             
             try {
                 isReading = true;
                 startTime = null;
                 
                 // Send 10µs pulse to trigger pin
-                gpio.write(node.triggerPin, true, function(err) {
-                    if (err) {
-                        node.error("Failed to write HIGH to trigger: " + err.message);
-                        isReading = false;
-                        return;
-                    }
-                    
+                if (writeGpio(node.triggerPin, true)) {
                     setTimeout(function() {
-                        gpio.write(node.triggerPin, false, function(err) {
-                            if (err) {
-                                node.error("Failed to write LOW to trigger: " + err.message);
-                                isReading = false;
-                            }
-                        });
+                        writeGpio(node.triggerPin, false);
                     }, 0.01); // 10µs delay
-                });
+                } else {
+                    isReading = false;
+                    return;
+                }
                 
-                // Safety timeout to reset reading state
+                // Safety timeout
                 setTimeout(function() {
                     if (isReading) {
                         isReading = false;
                         node.status({fill: "yellow", shape: "ring", text: "timeout"});
                     }
-                }, 100); // 100ms timeout
+                }, 100);
                 
             } catch (err) {
                 isReading = false;
-                node.error("Failed to trigger measurement: " + err.message);
+                node.error("Trigger measurement failed: " + err.message);
                 node.status({fill: "red", shape: "ring", text: "trigger failed"});
             }
         }
+        
+        // Initialize GPIO after a short delay
+        setTimeout(function() {
+            if (initializeGpio()) {
+                node.log("HC-SR04 node initialized successfully");
+            }
+        }, 100);
         
         // Start periodic measurements
         function startMeasurements() {
@@ -169,18 +242,35 @@ module.exports = function(RED) {
         
         // Clean up on node close
         node.on('close', function() {
+            isInitialized = false;
+            isReading = false;
+            
             // Clear measurement timer
             if (measurementTimer) {
                 clearInterval(measurementTimer);
                 measurementTimer = null;
             }
             
+            // Clear echo watcher
+            if (echoWatcher) {
+                clearInterval(echoWatcher);
+                echoWatcher = null;
+            }
+            
             // Clean up GPIO resources
             try {
-                gpio.write(node.triggerPin, false); // Set trigger to LOW
-                gpio.destroy(); // Clean up all GPIO
+                // Set trigger to LOW
+                writeGpio(node.triggerPin, false);
+                
+                // Unexport pins
+                if (fs.existsSync('/sys/class/gpio/gpio' + node.triggerPin)) {
+                    fs.writeFileSync('/sys/class/gpio/unexport', node.triggerPin.toString());
+                }
+                if (fs.existsSync('/sys/class/gpio/gpio' + node.echoPin)) {
+                    fs.writeFileSync('/sys/class/gpio/unexport', node.echoPin.toString());
+                }
             } catch (err) {
-                node.error("Error during cleanup: " + err.message);
+                // Ignore cleanup errors
             }
             
             node.status({fill: "red", shape: "ring", text: "disconnected"});

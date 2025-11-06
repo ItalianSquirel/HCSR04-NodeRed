@@ -49,7 +49,7 @@
 </script>
 
 <script type="text/x-red" data-help-name="hcsr04">
-    <p>A Node-RED node for interfacing with HC-SR04 ultrasonic distance sensor on Raspberry Pi using rpi-gpio.</p>
+    <p>A Node-RED node for interfacing with HC-SR04 ultrasonic distance sensor on Raspberry Pi using native GPIO filesystem interface.</p>
     
     <h3>Outputs</h3>
     <dl class="message-properties">
@@ -86,10 +86,10 @@
     </dl>
 
     <h3>Details</h3>
-    <p>This node uses the rpi-gpio library for GPIO control and high-resolution timing. The HC-SR04 sensor works by:</p>
+    <p>This node uses the native Linux GPIO filesystem interface (/sys/class/gpio) for reliable GPIO control and process.hrtime.bigint() for high-resolution timing. The HC-SR04 sensor works by:</p>
     <ol>
         <li>Sending a 10µs trigger pulse</li>
-        <li>Measuring the echo pulse duration using process.hrtime.bigint()</li>
+        <li>Measuring the echo pulse duration using nanosecond-precision timing</li>
         <li>Calculating distance: <code>distance = pulse_duration / 2 / 29.1</code></li>
     </ol>
     
@@ -97,7 +97,7 @@
     <ul>
         <li>Raspberry Pi with Node-RED installed</li>
         <li>HC-SR04 sensor wired to configured GPIO pins</li>
-        <li>Node.js rpi-gpio package installed</li>
+        <li>No additional Node.js packages required (uses native fs module)</li>
         <li>Node-RED running as root or user in gpio group</li>
     </ul>
 
