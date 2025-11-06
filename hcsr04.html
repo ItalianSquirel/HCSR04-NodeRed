@@ -1,0 +1,113 @@
+<script type="text/javascript">
+    RED.nodes.registerType('hcsr04', {
+        category: 'hardware',
+        color: '#87CEEB',
+        defaults: {
+            name: { value: "" },
+            trigger: { value: 18, required: true, validate: RED.validators.number() },
+            echo: { value: 24, required: true, validate: RED.validators.number() },
+            interval: { value: 1000, required: true, validate: RED.validators.number() }
+        },
+        inputs: 1,
+        outputs: 1,
+        icon: "font-awesome/fa-rss",
+        label: function() {
+            return this.name || "HC-SR04";
+        },
+        labelStyle: function() {
+            return this.name ? "node_label_italic" : "";
+        },
+        oneditprepare: function() {
+            // Set up any special UI behavior here if needed
+            $("#node-input-trigger").spinner({min: 0, max: 40});
+            $("#node-input-echo").spinner({min: 0, max: 40});
+            $("#node-input-interval").spinner({min: 100, max: 60000, step: 100});
+        }
+    });
+</script>
+
+<script type="text/x-red" data-template-name="hcsr04">
+    <div class="form-row">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="Sensor Name">
+    </div>
+    <div class="form-row">
+        <label for="node-input-trigger"><i class="fa fa-microchip"></i> Trigger Pin</label>
+        <input type="number" id="node-input-trigger" placeholder="18" min="0" max="40">
+        <span class="form-tips">BCM GPIO pin number for trigger (default: 18)</span>
+    </div>
+    <div class="form-row">
+        <label for="node-input-echo"><i class="fa fa-microchip"></i> Echo Pin</label>
+        <input type="number" id="node-input-echo" placeholder="24" min="0" max="40">
+        <span class="form-tips">BCM GPIO pin number for echo (default: 24)</span>
+    </div>
+    <div class="form-row">
+        <label for="node-input-interval"><i class="fa fa-clock-o"></i> Interval (ms)</label>
+        <input type="number" id="node-input-interval" placeholder="1000" min="100" max="60000" step="100">
+        <span class="form-tips">Measurement interval in milliseconds (default: 1000ms)</span>
+    </div>
+</script>
+
+<script type="text/x-red" data-help-name="hcsr04">
+    <p>A Node-RED node for interfacing with HC-SR04 ultrasonic distance sensor on Raspberry Pi using rpi-gpio.</p>
+    
+    <h3>Outputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">number</span></dt>
+        <dd>Distance measurement in centimeters (2-400 cm range)</dd>
+        <dt>topic <span class="property-type">string</span></dt>
+        <dd>Set to "distance"</dd>
+        <dt>unit <span class="property-type">string</span></dt>
+        <dd>Set to "cm"</dd>
+        <dt>timestamp <span class="property-type">number</span></dt>
+        <dd>Unix timestamp of the measurement</dd>
+    </dl>
+
+    <h3>Inputs</h3>
+    <dl class="message-properties">
+        <dt>payload <span class="property-type">string|boolean</span></dt>
+        <dd>
+            <ul>
+                <li><code>"trigger"</code> or <code>true</code> - Take a single measurement</li>
+                <li><code>"start"</code> - Start continuous measurements</li>
+                <li><code>"stop"</code> - Stop continuous measurements</li>
+            </ul>
+        </dd>
+    </dl>
+
+    <h3>Configuration</h3>
+    <dl class="message-properties">
+        <dt>Trigger Pin</dt>
+        <dd>BCM GPIO pin number connected to HC-SR04 trigger pin (default: 18)</dd>
+        <dt>Echo Pin</dt>
+        <dd>BCM GPIO pin number connected to HC-SR04 echo pin (default: 24)</dd>
+        <dt>Interval</dt>
+        <dd>Time between automatic measurements in milliseconds (default: 1000ms)</dd>
+    </dl>
+
+    <h3>Details</h3>
+    <p>This node uses the rpi-gpio library for GPIO control and high-resolution timing. The HC-SR04 sensor works by:</p>
+    <ol>
+        <li>Sending a 10µs trigger pulse</li>
+        <li>Measuring the echo pulse duration using process.hrtime.bigint()</li>
+        <li>Calculating distance: <code>distance = pulse_duration / 2 / 29.1</code></li>
+    </ol>
+    
+    <p><strong>Requirements:</strong></p>
+    <ul>
+        <li>Raspberry Pi with Node-RED installed</li>
+        <li>HC-SR04 sensor wired to configured GPIO pins</li>
+        <li>Node.js rpi-gpio package installed</li>
+        <li>Node-RED running as root or user in gpio group</li>
+    </ul>
+
+    <p><strong>Wiring:</strong></p>
+    <ul>
+        <li>VCC → 5V</li>
+        <li>GND → Ground</li>
+        <li>Trig → GPIO pin (default: 18)</li>
+        <li>Echo → GPIO pin (default: 24) via voltage divider (3.3V logic)</li>
+    </ul>
+
+    <p><strong>Note:</strong> The echo pin outputs 5V but Raspberry Pi GPIO expects 3.3V. Use a voltage divider or level shifter.</p>
+</script>
